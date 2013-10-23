@@ -2,31 +2,33 @@
 # vi: set ft=ruby :
 
 #install Chef server
-$chef_server =<<SERVER
-wget -O https://opscode-omnibus-packages.s3.amazonaws.com/ubuntu/12.04/x86_64/chef-server_11.0.8-1.ubuntu.12.04_amd64.deb
-sudo pkg -i chef-server.deb
+$chef_server =<<EOF
+wget -O https://opscode-omnibus-packages.s3.amazonaws.com/ubuntu/12.04/x86_64/chef-server_11.0.8-1.ubuntu.12.04_amd64.deb -O chef-server.deb
+sudo dpkg -i chef-server.deb
 sudo chef-server-ctl reconfigure
-SERVER
+EOF
 
 #install Workstation
-$workstation =<<workstation
+$workstation =<<EOF
 curl -L https://www.opscode.com/chef/install.sh | sudo bash
 
 sudo apt-get update
-sudo apt-get install -y git ruby1.9.2
+sudo apt-get install -y git ruby1.9.3
 git clone git://github.com/opscode/chef-repo.git
 sudo mkdir -p ~/chef-repo/.chef
 cat .gitignore .chef
 
-log_level :info
-log_location STDOUT
-chef_server_url "chef_server.vagrant.com"
-client_key
-cookbook_path
-validation_client_name
-validation_key
-cache_type 'BasicFile'
-cache_options(path: '/Users/david/.chef/checksums')
+
+log_level                :info
+log_location             STDOUT
+node_name                'admin'
+client_key               '/home/vagrant/.chef/admin.pem'
+validation_client_name   'chef-validator'
+validation_key           '/home/vagrant/.chef/chef-validator.pem'
+chef_server_url          'https://10.22.22.2'
+chef_repo_path           '/home/vagrant/chef-repo'
+cache_type               'BasicFile'
+cache_options( :path =>  '/home/vagrant/.chef/checksums' )
 
 cp /path/to/knife.rb ~/chef-repo/.chef
 cp /etc/chef-server/chef-validator.pem ~/chef-repo/.chef
@@ -38,77 +40,67 @@ cat Cheffile <<
 
 librarian-chef install
 
-workstation
+EOF
+
 Vagrant.configure("2") do |config|
   
   config.vm.box = "precise"
   config.vm.box_url = "http://cloud-images.ubuntu.com/vagrant/precise/current/precise-server-cloudimg-amd64-vagrant-disk1.box"
 
   config.vm.define :chef_server do |chef_server|
-    chef_server.vm.box = "precise"
-    chef_server.vm.host_name = "chef_server.vagrant.com"
-    chef_server.vm.network  :private_network, ip: "10.22.22.1"
-    chef_server.vm.synced_folder "/home/vagrant", "~/vagrant"
+    chef_server.vm.host_name = "chef_server.vagrant.local"
+    chef_server.vm.network  :private_network, ip: "10.22.22.2"
+    chef_server.vm.synced_folder "vagrant", "/home/vagrant/chef-repo/.chef"
     
     chef_server.vm.provider :virtualbox do |vb|
       vb.customize ["modifyvm", :id, "--memory", "1024"]
-      vb.customize ["modifyvm", :id, "--cpu" "2"]
+      vb.customize ["modifyvm", :id, "--cpus", "2"]
     end
     config.vm.provision "shell", inline: $chef_server
     config.vm.provision "shell", inline: $workstation
   end
   
   
-  config.vm.define :application do |chef_client_config|
-    chef_client_config.vm.box = "precise"
-    chef_client_config.vm.host_name = "application.vagrant.com"
-    chef_client_config.vm.network :private_network, ip: "10.22.22.2"
-  
-    config.vm.provision :chef_client do |chef|
-      chef.chef_server_url = "https://api.opscode.com/organizations/ORGNAME"
-      chef.validation_key_path = "ORGNAME-validator.pem"
-
-      config.vm.provision "shell", inline: $app
-   end
+  config.vm.define :application do |app|
+    app.vm.host_name = "application.vagrant.local"
+    app.vm.network :private_network, ip: "10.22.22.3"
   end 
   
-  config.vm.define :monitor do |chef_client_config|
-    chef_client_config.vm.box = "precise"
-    chef_client_config.vm.host_name = "monitor.vagrant.com"
-    chef_client_config.vm.network :private_network, ip: "10.22.22.3"
+  config.vm.define :monitor do |monitor|
+    monitor.vm.host_name = "monitor.vagrant.local"
+    monitor.vm.network :private_network, ip: "10.22.22.4"
     
-    config.vm.provision :chef_client do |chef|
+    monitor.vm.provision :chef_client do |chef|
       chef.chef_server_url = "https://api.opscode.com/organizations/ORGNAME"
       chef.validation_key_path = "ORGNAME-validator.pem"
-
-      config.vm.provision "shell", inline: $monitor
-   end
+      chef.validation_client_name = "ORGNAME-validator"
+    end
+      monitor.vm.provision "shell", inline: $monitor
+   
   end 
   
-  config.vm.define :capistrano do |chef_client_config|
-    chef_client_config.vm.box = "precise"
-    chef_client_config.vm.host_name = "capistrano.vagrant.com"
-    chef_client_config.vm.network :private_network, ip: "10.22.22.4"
+  config.vm.define :capistrano do |capistrano|
+    capistrano.vm.host_name = "capistrano.vagrant.local"
+    capistrano.vm.network :private_network, ip: "10.22.22.5"
   
-    config.vm.provision :chef_client do |chef|
+    capistrano.vm.provision :chef_client do |chef|
       chef.chef_server_url = "https://api.opscode.com/organizations/ORGNAME"
       chef.validation_key_path = "ORGNAME-validator.pem"
-
-      config.vm.provision "shell", inline: $capistrano
-   end 
+      chef.validation_client_name = "ORGNAME-validator"
+    end
+      capistrano.vm.provision "shell", inline: $capistrano
+    
   end 
   
-  config.vm.define :mongodb do |chef_client_config|
-    chef_client_config.vm.box = "precise"
-    chef_client_config.vm.host_name = "mongodb.vagrant.com"
-    chef_client_config.vm.network :private_network, ip: "10.22.22.5"
+  config.vm.define :mongodb do |mongodb|
+    mongodb.vm.host_name = "mongodb.vagrant.local"
+    mongodb.vm.network :private_network, ip: "10.22.22.6"
 
-    config.vm.provision :chef_client do |chef|
+    mongodb.vm.provision :chef_client do |chef|
      chef.chef_server_url = "https://api.opscode.com/organizations/ORGNAME"
      chef.validation_key_path = "ORGNAME-validator.pem"
-
-     config.vm.provision "shell", inline: $mongodb
-   end
+     chef.validation_client_name = "ORGNAME-validator"   
+    end
   end  
   
   
